@@ -14,8 +14,8 @@ def lambda_handler(event, context):
         query = event['requestBody']['content']['application/json']['properties'][0]['value']
 
         print("the received QUERY:",  query)
-        
-        s3_output = 's3://aws-waf-logs-tempstore/AWSLogs/071763026037/WAFLogs/cloudfront/CreatedByCloudFront-948f2dd6-8ee8-450b-99c7-5df11c8f9404/'  # Replace with your S3 bucket
+        # Replace with your S3 bucket
+        s3_output = 's3://aws-waf-logs/'  
 
         # Execute the query and wait for completion
         execution_id = execute_athena_query(query, s3_output)
