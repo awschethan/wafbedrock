@@ -1,0 +1,82 @@
+import json
+import boto3
+import streamlit as st
+from datetime import datetime, timedelta
+
+# Initialize AWS clients
+session = boto3.Session(profile_name='default')
+waf = session.client(service_name='wafv2')
+bedrock = session.client(service_name='bedrock-runtime')
+bedrock_model_id = 'ai21.j2-ultra-v1'   # Using AI21 Labs Jurassic model. For all model IDs, refer https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html
+
+# Function to fetch and analyze AWS WAF logs
+def fetch_and_analyze_waf_logs(web_acl_arn, rule_metric_name, user_prompt):
+    # Get the current time and the time 60 minutes ago
+    current_time = datetime.utcnow()
+    start_time = current_time - timedelta(minutes=60)
+
+    # Fetch the AWS WAF logs for last 60 minutes from a specific WebACL 
+    response = waf.get_sampled_requests(
+        WebAclArn=web_acl_arn,
+        RuleMetricName=rule_metric_name,
+        Scope='CLOUDFRONT',  # Change this to REGIONAL if WebACL is associated with regional resources such as ALB or API Gateway
+        TimeWindow={
+            'StartTime': start_time,
+            'EndTime': current_time
+        },
+        MaxItems=100
+    )
+
+    # Create a prompt with WAF logs appended to it
+    input_data = "Analyze the following AWS WAF logs and provide insights for the following: " + str(user_prompt) + " " + str(response)
+
+    # FOR DEBUGGING: print the input prompt created in command line. Comment out if not required.
+    print("Input Prompt = ")
+    print(input_data)
+
+    # Provide inference parameters to the Amazon Bedrock model. This format is specific to AI21 model. For parameters for other models, refer https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters.html
+    body = json.dumps({
+        "prompt": input_data,
+        "maxTokens": 1024, 
+        "temperature": 0, 
+        "topP": 0.5, 
+        "stopSequences": [], 
+        "countPenalty": {"scale": 0 }, 
+        "presencePenalty": {"scale": 0 }, 
+        "frequencyPenalty": {"scale": 0 }
+    })
+
+    # Invoke Amazon Bedrock with the input data in JSON format
+    bedrock_response = bedrock.invoke_model(
+        modelId=bedrock_model_id,
+        body=body,
+        contentType='application/json',
+        accept='application/json'
+    )
+
+    # Decode the response body
+    response_body = json.loads(bedrock_response['body'].read().decode('utf-8'))  
+
+    # Extract the text from the JSON response
+    response_text = response_body.get("completions", [])
+    if response_text:
+        response_text = response_text[0].get("data", {}).get("text", "")
+
+    return response_text
+
+# Streamlit app to capture user input and display results
+def main():
+    st.title("Analyze AWS WAF Logs with GenAI using Amazon Bedrock")
+
+    # Get user input for WebAclArn and RuleMetricName
+    web_acl_arn = st.text_input("Enter WebAclArn", value="")
+    rule_metric_name = st.text_input("Enter RuleMetricName", value="")
+    user_prompt = st.text_input("Enter your question", value="What rule is causing the 403 block?")
+
+    # Run the analysis when the user clicks the button
+    if st.button("Analyze WAF Logs"):
+        analysis = fetch_and_analyze_waf_logs(web_acl_arn, rule_metric_name, user_prompt)
+        st.write(analysis)
+
+if __name__ == "__main__":
+    main()
